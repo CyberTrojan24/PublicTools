@@ -1,2 +1,6 @@
 # Python version requirement
 python>=3.6
+pyperclip>=1.8.2
+rich>=13.0.0
+
+

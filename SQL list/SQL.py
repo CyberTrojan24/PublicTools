@@ -1,122 +1,152 @@
+from injection_types import InjectionManager
+from rich.console import Console
+from rich.table import Table
+from rich.panel import Panel
+from rich.text import Text
+import sys
+
+console = Console()
+
 class SQLShell:
     def __init__(self):
         self.running = True
-        self.data = {}  # Simple in-memory storage
+        self.injection_manager = InjectionManager()
         self.commands = {
-            'create': self.create_table,
-            'insert': self.insert_data,
-            'select': self.select_data,
+            'list': self.list_categories,
+            'show': self.show_injections,
+            'get': self.get_injection,
             'help': self.show_help,
-            'exit': self.exit_shell,
-            'show': self.show_tables
+            'exit': self.exit_shell
         }
 
-    def create_table(self, args):
-        # CREATE table_name (col1, col2, col3)
-        if len(args) < 3 or '(' not in ' '.join(args) or ')' not in ' '.join(args):
-            print("Syntax: CREATE table_name (column1, column2, ...)")
+    def list_categories(self, args=None):
+        table = Table(title="Available SQL Injection Categories")
+        table.add_column("Category", style="cyan")
+        table.add_column("Count", style="green")
+        
+        for category in self.injection_manager.categories:
+            count = len(self.injection_manager.categories[category])
+            table.add_row(category, str(count))
+        
+        console.print(table)
+
+    def show_injections(self, args):
+        if not args:
+            console.print("[red]Error: Category name required[/red]")
+            return
+        
+        category = " ".join(args)
+        if category in self.injection_manager.categories:
+            table = Table(title=f"Injections for {category}")
+            table.add_column("#", style="cyan", justify="right")
+            table.add_column("Payload", style="green")
+            
+            for i, injection in enumerate(self.injection_manager.categories[category], 1):
+                table.add_row(str(i), injection['payload'])
+            
+            console.print(table)
+        else:
+            console.print("[red]Invalid category. Use 'list' to see available categories.[/red]")
+
+    def get_injection(self, args):
+        if not args or len(args) < 2:
+            console.print("[red]Error: Required format: get <category> <number> [-explain][/red]")
             return
 
-        table_name = args[0]
-        # Extract columns between parentheses
-        cols_str = ' '.join(args[1:]).split('(')[1].split(')')[0]
-        columns = [col.strip() for col in cols_str.split(',')]
-
-        self.data[table_name] = {
-            'columns': columns,
-            'rows': []
-        }
-        print(f"Table {table_name} created with columns: {', '.join(columns)}")
-
-    def insert_data(self, args):
-        # INSERT table_name VALUES (val1, val2, val3)
-        if len(args) < 3 or 'values' not in ' '.join(args).lower():
-            print("Syntax: INSERT table_name VALUES (value1, value2, ...)")
+        # Find the position of the last argument that could be a number
+        number_pos = -1
+        for i, arg in enumerate(args):
+            if arg.isdigit():
+                number_pos = i
+                break
+        
+        if number_pos == -1:
+            console.print("[red]Error: No injection number provided[/red]")
             return
 
-        table_name = args[0]
-        if table_name not in self.data:
-            print(f"Table {table_name} does not exist")
-            return
+        # Everything before the number is the category
+        category = " ".join(args[:number_pos])
+        try:
+            index = int(args[number_pos])
+            explain = "-explain" in args
+            
+            if category in self.injection_manager.categories:
+                injections = self.injection_manager.categories[category]
+                if 1 <= index <= len(injections):
+                    injection = injections[index - 1]
+                    import pyperclip
+                    pyperclip.copy(injection['payload'])
+                    
+                    panel = Panel(
+                        Text(injection['payload'], style="green"),
+                        title="Copied to clipboard",
+                        border_style="cyan"
+                    )
+                    console.print(panel)
+                    
+                    if explain:
+                        explanation_panel = Panel(
+                            Text(injection['explanation'], style="yellow"),
+                            title="Explanation",
+                            border_style="blue"
+                        )
+                        console.print(explanation_panel)
+                else:
+                    console.print("[red]Invalid injection number[/red]")
+            else:
+                console.print("[red]Invalid category[/red]")
+        except ValueError:
+            console.print("[red]Invalid injection number[/red]")
 
-        # Extract values between parentheses
-        values_str = ' '.join(args[2:]).split('(')[1].split(')')[0]
-        values = [val.strip() for val in values_str.split(',')]
+    def show_help(self, args=None):
+        help_table = Table(title="Available Commands")
+        help_table.add_column("Command", style="cyan")
+        help_table.add_column("Description", style="green")
+        
+        help_table.add_row("list", "Show all SQL injection categories")
+        help_table.add_row("show <category>", "List injections in a category")
+        help_table.add_row(
+            "get <category> <number> [-explain]",
+            "Get specific injection and copy to clipboard\nUse -explain flag for detailed explanation"
+        )
+        help_table.add_row("help", "Show this help message")
+        help_table.add_row("exit", "Exit the shell")
+        
+        console.print(help_table)
 
-        if len(values) != len(self.data[table_name]['columns']):
-            print("Number of values doesn't match number of columns")
-            return
-
-        self.data[table_name]['rows'].append(values)
-        print("Data inserted successfully")
-
-    def select_data(self, args):
-        # SELECT * FROM table_name
-        if len(args) < 3 or 'from' not in ' '.join(args).lower():
-            print("Syntax: SELECT * FROM table_name")
-            return
-
-        table_name = args[-1]
-        if table_name not in self.data:
-            print(f"Table {table_name} does not exist")
-            return
-
-        # Print columns
-        columns = self.data[table_name]['columns']
-        print(' | '.join(columns))
-        print('-' * (len(' | '.join(columns)) + 2))
-
-        # Print rows
-        for row in self.data[table_name]['rows']:
-            print(' | '.join(row))
-
-    def show_tables(self, args):
-        if not self.data:
-            print("No tables exist")
-            return
-        print("\nAvailable tables:")
-        for table in self.data:
-            print(f"- {table}")
-            print(f"  Columns: {', '.join(self.data[table]['columns'])}")
-            print(f"  Rows: {len(self.data[table]['rows'])}\n")
-
-    def show_help(self, args):
-        print("\nAvailable commands:")
-        print("  CREATE table_name (col1, col2, ...)  - Create a new table")
-        print("  INSERT table_name VALUES (val1, ...) - Insert data into table")
-        print("  SELECT * FROM table_name             - Display table contents")
-        print("  SHOW TABLES                          - List all tables")
-        print("  EXIT                                 - Exit the shell")
-        print("  HELP                                 - Show this help message\n")
-
-    def exit_shell(self, args):
+    def exit_shell(self, args=None):
         self.running = False
-        print("Goodbye!")
+        console.print("[yellow]Goodbye![/yellow]")
 
     def run(self):
-        print("Welcome to SQLShell! Type 'help' for available commands.")
+        banner = Panel(
+            Text("SQL Injection Examples Shell\nType 'help' for available commands", 
+                 style="cyan", justify="center"),
+            border_style="blue"
+        )
+        console.print(banner)
+        
         while self.running:
             try:
-                user_input = input("sql> ")
-                if not user_input.strip():
+                command = console.input("[blue]sql>[/blue] ").strip().split()
+                if not command:
                     continue
-
-                # Parse command and arguments
-                parts = user_input.strip().split()
-                command = parts[0].lower()
-                args = parts[1:]
-
-                if command in self.commands:
-                    self.commands[command](args)
+                
+                cmd = command[0].lower()
+                args = command[1:] if len(command) > 1 else None
+                
+                if cmd in self.commands:
+                    self.commands[cmd](args)
                 else:
-                    print(f"Unknown command: {command}")
-                    print("Type 'help' for available commands")
-
+                    console.print("[red]Unknown command. Type 'help' for available commands[/red]")
             except KeyboardInterrupt:
-                print("\nUse 'exit' to quit the shell")
+                print("\nUse 'exit' to quit")
             except Exception as e:
-                print(f"Error: {e}")
+                console.print(f"[red]Error: {str(e)}[/red]")
 
-if __name__ == "__main__":
+def main():
     shell = SQLShell()
     shell.run()
+
+if __name__ == "__main__":
+    main()
